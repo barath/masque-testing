@@ -19,6 +19,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/signal"
 	"strconv"
 	"strings"
 	"sync"
@@ -279,12 +280,12 @@ func main() {
 		os.Exit(1)
 	}
 
-	level := slog.LevelInfo
-	if *verbose {
-		level = slog.LevelDebug
-	}
+	logFile, _ := os.CreateTemp("", "relayproxy.log")
+	defer logFile.Close()
 
-	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
+	level := slog.LevelDebug
+
+	logger := slog.New(slog.NewTextHandler(logFile, &slog.HandlerOptions{
 		Level: level,
 	}))
 	slog.SetDefault(logger)
@@ -313,6 +314,17 @@ func main() {
 	relayClient = c
 
 	go runProxyStatusHTTPServer()
+
+	sigs := make(chan os.Signal, 1)
+	signal.Notify(sigs, syscall.SIGHUP, syscall.SIGINT, syscall.SIGQUIT, syscall.SIGTERM)
+
+	go func() {
+		sig := <-sigs
+
+		logger.Error("Received signal, shutting down:", sig)
+		logFile.Sync()
+		os.Exit(1)
+	}()
 
 	for {
 		conn, err := l.Accept()
